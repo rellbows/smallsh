@@ -21,7 +21,9 @@ int main(){
 	char* token = NULL;
 
 	char inputArgs[MAXARGS][MAXARGSIZE];
-	int numArgs = 0;		
+	int numArgs = 0;
+
+	int i = 0;		
 
 	while(1){
 		
@@ -37,13 +39,55 @@ int main(){
 		token = strtok(input, " ");
 
 		while(token != NULL){
-			printf("%s\n", token);
+		
+			// check num of arguments
+			numArgs++;
+			if(numArgs > MAXARGS){
+				printf("Error! Max num. of arguments is %d", MAXARGS);
+				break;
+			}
+			else{
+				strncpy(inputArgs[numArgs - 1], token, (size_t) MAXARGSIZE);
+			}
+
+			// testing
+			printf("%s\n", inputArgs[numArgs - 1]);
+			
 			token = strtok(NULL, " ");
 		}	
 
 		// use command (1st arg) to process input
+		if(strcmp(inputArgs[0], "exit") == 0){
+			// testing
+			printf("exit\n");
+		}
+		else if(strcmp(inputArgs[0], "cd") == 0){
+			// testing
+			printf("cd\n");
+		}
+		else if(strcmp(inputArgs[0], "status") == 0){
+			// testing
+			printf("status\n");
+		}
+		else if(strcmp(inputArgs[0], "#") == 0){
+			// testing
+			printf("comment\n");
+		}
+		else if(numArgs == 0){
+			// testing
+			printf("blank line\n");
+		}
+		else{
+			printf("Not built-in cmd\n");
+		}
 
+		// reset arg counter for next command
+		numArgs = 0;
 
+		// reset args
+		for(int i = 0; i < numArgs; i++){
+			memset(inputArgs[i], '\0', sizeof(*inputArgs));
+		}
 	}
 
 	return 0;
