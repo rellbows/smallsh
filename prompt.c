@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+void cd(char* pathName);
 
 int MAXARGS = 512;
 int MAXARGSIZE = 100;
@@ -17,6 +20,8 @@ int main(){
 	memset(input, '\0', cmdLength);
 
 	ssize_t nread;
+
+	pid_t smallshPID = getpid();
 
 	char* token = NULL;
 
@@ -35,6 +40,16 @@ int main(){
 
 		input[nread - 1] = '\0';
 
+		if(input[0] == '#'){
+			continue;
+		}
+		
+		// TODO: this is not working right. need to incorporate
+		// into the tokenize operation and use strstr()
+		if(input[0] == '$' && input[1] == '$'){
+			printf("%d", smallshPID);
+		}
+
 		// parse out input into array
 		token = strtok(input, " ");
 
@@ -50,9 +65,6 @@ int main(){
 				strncpy(inputArgs[numArgs - 1], token, (size_t) MAXARGSIZE);
 			}
 
-			// testing
-			printf("%s\n", inputArgs[numArgs - 1]);
-			
 			token = strtok(NULL, " ");
 		}	
 
@@ -62,22 +74,13 @@ int main(){
 			printf("exit\n");
 		}
 		else if(strcmp(inputArgs[0], "cd") == 0){
-			// testing
-			printf("cd\n");
+			cd(inputArgs[1]);
 		}
 		else if(strcmp(inputArgs[0], "status") == 0){
 			// testing
 			printf("status\n");
 		}
-		else if(strcmp(inputArgs[0], "#") == 0){
-			// testing
-			printf("comment\n");
-		}
-		else if(numArgs == 0){
-			// testing
-			printf("blank line\n");
-		}
-		else{
+		else if(strcmp(inputArgs[0], "") != 0){
 			printf("Not built-in cmd\n");
 		}
 
@@ -91,4 +94,22 @@ int main(){
 	}
 
 	return 0;
+}
+
+void cd(char* pathName){
+
+	int chdirStatus;
+	char cwd[100]; 
+
+	// No destination dir given = go home!
+	if(pathName == NULL){
+		pathName = (getenv("HOME"));
+	}
+	
+	if(chdir(pathName) != 0){
+		perror("chdir");
+	}
+
+	// testing
+	printf("%s\n", getcwd(cwd, 100));
 }
