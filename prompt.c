@@ -9,10 +9,13 @@
 
 void cd(char* pathName);
 
-int MAXARGS = 512;
+int MAXARGS = 513; // 512 args + NULL
 int MAXARGSIZE = 100;
 
 int main(){
+
+	// testing
+	int loopGuard = 0;
 
 	char* input = NULL;
 	size_t cmdLength = 2049;
@@ -25,12 +28,22 @@ int main(){
 
 	char* token = NULL;
 
+	char command[MAXARGSIZE];
+
 	char inputArgs[MAXARGS][MAXARGSIZE];
 	int numArgs = 0;
+	
+	int commandFlag = 0;
+
+	char inFile[MAXARGSIZE];
+	char outFile[MAXARGSIZE];
+	
+	int backgroundFlag = 0;
 
 	int i = 0;		
 
-	while(1){
+	// testing: have limited # of times while can run for now...
+	while(loopGuard < 75){
 		
 		printf(": ");
 		fflush(stdout);	
@@ -44,29 +57,49 @@ int main(){
 			continue;
 		}
 		
-		// TODO: this is not working right. need to incorporate
-		// into the tokenize operation and use strstr()
-		if(input[0] == '$' && input[1] == '$'){
-			printf("%d", smallshPID);
-		}
-
 		// parse out input into array
 		token = strtok(input, " ");
 
 		while(token != NULL){
-		
-			// check num of arguments
-			numArgs++;
-			if(numArgs > MAXARGS){
-				printf("Error! Max num. of arguments is %d", MAXARGS);
-				break;
+	
+			// load command
+			if(commandFlag == 0){
+				strncpy(command, token, (size_t) MAXARGSIZE);
+				commandFlag = 1;
 			}
+			// input file
+			else if(token[0] == '<'){
+				token = strtok(NULL, " ");
+				strncpy(inFile, token, (size_t) MAXARGSIZE);
+			}
+			// output file
+			else if(token[0] == '>'){
+				token = strtok(NULL, " ");
+				strncpy(outFile, token, (size_t) MAXARGSIZE);
+			}
+			else if(token[0] == '&'){
+				backgroundFlag = 1;
+			}
+			// argument
 			else{
-				strncpy(inputArgs[numArgs - 1], token, (size_t) MAXARGSIZE);
+		
+				// check num of arguments
+				numArgs++;
+				if(numArgs > (MAXARGS - 1)){
+					printf("Error! Max num. of arguments is %d", MAXARGS);
+					break;
+				}
+				else{
+					strncpy(inputArgs[numArgs - 1], token, (size_t) MAXARGSIZE);
+				}
 			}
 
 			token = strtok(NULL, " ");
 		}	
+
+		// append NULL to end of arg list
+		numArgs++;
+		inputArgs[numArgs - 1] = NULL;		
 
 		// use command (1st arg) to process input
 		if(strcmp(inputArgs[0], "exit") == 0){
@@ -84,13 +117,34 @@ int main(){
 			printf("Not built-in cmd\n");
 		}
 
-		// reset arg counter for next command
+		/*
+		// testing
+		printf("CMD: %s\n", command);
+		printf("ARGS:\n");
+		for(int j = 0; j < numArgs; j++){
+			printf("%s\n", inputArgs[j]);
+		}
+		printf("IN: %s\n", inFile);
+		printf("OUT: %s\n", outFile);
+		printf("BACKGROUND: %d\n", backgroundFlag);
+		*/
+
+		// reset command and in/out file
+		memset(command, '\0', sizeof(command));
+		memset(inFile, '\0', sizeof(inFile));
+		memset(outFile, '\0', sizeof(outFile));
+
+		// reset command flag, background flag, and arg counter for next command
+		commandFlag = 0;
+		backgroundFlag = 0;
 		numArgs = 0;
 
 		// reset args
 		for(int i = 0; i < numArgs; i++){
 			memset(inputArgs[i], '\0', sizeof(*inputArgs));
 		}
+
+		loopGuard++;
 	}
 
 	return 0;
