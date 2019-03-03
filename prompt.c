@@ -2,6 +2,7 @@
 
 #define _GNU_SOURCE
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +13,7 @@ int MAXARGS = 513; // 512 args + NULL
 int MAXARGSIZE = 100;
 
 void cd(char* pathName);
-void execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag, int childPID, int* childExitMethod);
+pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag);
 void status(int childExitMethod);
 
 int main(){
@@ -54,7 +55,7 @@ int main(){
 
 	// vars for command execution
 	int childExitMethod = -5;
-	int childPID = -5;
+	pid_t childPID = -5;
 	int backgroundPIDs[50];
 	int numBackgroundPIDs = 0;
 
@@ -157,9 +158,7 @@ int main(){
 			// testing
 			printf("Not built-in cmd\n");
 		
-			childPID = fork();
-		
-			execute(inputArgs, inFile, outFile, backgroundFlag, childPID, &childExitMethod);
+			childPID = execute(inputArgs, inFile, outFile, backgroundFlag);
 		}
 
 		/*
@@ -173,12 +172,12 @@ int main(){
 		printf("IN: %s\n", inFile);
 		printf("OUT: %s\n", outFile);
 		printf("BACKGROUND: %d\n", backgroundFlag);
+		*/
 
 		// reset command and in/out file
 		memset(command, '\0', sizeof(command));
 		memset(inFile, '\0', sizeof(inFile));
 		memset(outFile, '\0', sizeof(outFile));
-		*/
 
 		// reset args
 		int i = 0;
@@ -231,12 +230,76 @@ void cd(char* pathName){
 // handles the execution of commands
 // CITATION: used below link as ref. for setting up fork/execvp/wait
 // https://web.mst.edu/~ercal/284/UNIX-fork-exec/Fork-Exec-2.cpp
-void execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag, int childPID, int* childExitMethod){
-	
-	// check whether 
+pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag){
+
+	int inFD, outFD, result, childExitMethod;
+	pid_t childPID;
+
+	childPID = fork();
+
+	// child thread 
 	if(childPID == 0){
+	
+		// input file specified
+		if(strlen(inFile) != 0){
+		
+			// testing
+			printf("In inFile %s\n", inFile);
+			
+			inFD = open(inFile, O_RDONLY);
+			
+			// check open
+			if(inFD == -1){
+				perror("input file open()");
+				fflush(stdout);
+				exit(1);
+			}
+
+			// set stdin to input file
+			result = dup2(inFD, 0);
+			
+			// check redirection
+			if(result == -1){
+				perror("input dup2()");
+				fflush(stdout);
+				exit(1);
+			}
+
+			// close on exec call
+			fcntl(inFD, F_SETFD, FD_CLOEXEC);
+		}
+
+		// output file specified
+		if(strlen(outFile) != 0){
+
+			// testing
+			printf("In outFile%s\n", outFile);
+
+			outFD = open(outFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			
+			// check open
+			if(outFD == -1){
+				perror("output file open()");
+				fflush(stdout);
+				exit(1);
+			}
+
+			// set stdout to output file
+			result = dup2(outFD, 1);
+
+			// check redirection
+			if(result == -1){
+				perror("output dup2()");
+				fflush(stdout);
+				exit(1);
+			}
+
+			// close on exec call
+			fcntl(outFD, F_SETFD, FD_CLOEXEC);
+		}
+	
 		// testing
-		printf("Child executing... %s\n", inputArgs[0]);
+		printf("Child executing... %s, %d\n", inputArgs[0], childPID);
 		fflush(stdout);
 
 		execvp(inputArgs[0], inputArgs);
@@ -245,13 +308,15 @@ void execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgrou
 		printf("%s is not a valid command\n", inputArgs[0]);
 		exit(1);
 	}
+	// parent thread
 	else if(childPID > 0){
+		
 		if(backgroundFlag == 0){
 			// testing
-			printf("Parent waiting...\n");
+			printf("Parent waiting... %d\n", childPID);
 			fflush(stdout);
 
-			waitpid(childPID, childExitMethod, 0);
+			waitpid(childPID, &childExitMethod, 0);
 		}
 		else{
 			// testing
