@@ -6,12 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-void cd(char* pathName);
-void status(int childExitMethod);
+#include <wait.h>
 
 int MAXARGS = 513; // 512 args + NULL
 int MAXARGSIZE = 100;
+
+void cd(char* pathName);
+void execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag, int childPID, int* childExitMethod);
+void status(int childExitMethod);
 
 int main(){
 
@@ -53,6 +55,8 @@ int main(){
 	// vars for command execution
 	int childExitMethod = -5;
 	int childPID = -5;
+	int backgroundPIDs[50];
+	int numBackgroundPIDs = 0;
 
 	// testing: have limited # of times while can run for now...
 	while(loopGuard < 75){
@@ -80,6 +84,7 @@ int main(){
 				//printf("Double Ampersand!\n");
 			}
 
+			/* TODO: don't think this is needed
 			// load command
 			if(commandFlag == 0){
 				// testing
@@ -88,6 +93,7 @@ int main(){
 				strncpy(command, token, (size_t) MAXARGSIZE);
 				commandFlag = 1;
 			}
+			*/
 			// input file
 			else if(token[0] == '<'){
 				// testing
@@ -135,26 +141,25 @@ int main(){
 		inputArgs[numArgs - 1] = NULL;		
 
 		// use command (1st arg) to process input
-		if(strcmp(command, "exit") == 0){
+		if(strcmp(inputArgs[0], "exit") == 0){
 			// testing
 			printf("exit\n");
 			
 			break;
 		}
-		else if(strcmp(command, "cd") == 0){
-			cd(inputArgs[0]);
+		else if(strcmp(inputArgs[0], "cd") == 0){
+			cd(inputArgs[1]);
 		}
-		else if(strcmp(command, "status") == 0){
-			// testing
-			printf("status\n");
-
+		else if(strcmp(inputArgs[0], "status") == 0){
 			status(childExitMethod);
 		}
-		else if(strcmp(command, "") != 0){
+		else if(strcmp(inputArgs[0], "") != 0){
 			// testing
 			printf("Not built-in cmd\n");
-			
-			//execute(command, inputArgs, numArgs, inFile, outFile, backgroundFlag);
+		
+			childPID = fork();
+		
+			execute(inputArgs, inFile, outFile, backgroundFlag, childPID, &childExitMethod);
 		}
 
 		/*
@@ -215,11 +220,45 @@ void cd(char* pathName){
 	if(chdir(pathName) != 0){
 		perror("chdir");
 		fflush(stdout);
+		exit(1);
 	}
 
 	// testing
 	//printf("%s\n", getcwd(cwd, 100));
 	//fflush(stdout);
+}
+
+// handles the execution of commands
+// CITATION: used below link as ref. for setting up fork/execvp/wait
+// https://web.mst.edu/~ercal/284/UNIX-fork-exec/Fork-Exec-2.cpp
+void execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag, int childPID, int* childExitMethod){
+	
+	// check whether 
+	if(childPID == 0){
+		// testing
+		printf("Child executing... %s\n", inputArgs[0]);
+		fflush(stdout);
+
+		execvp(inputArgs[0], inputArgs);
+
+		// if command successful, below will not run
+		printf("%s is not a valid command\n", inputArgs[0]);
+		exit(1);
+	}
+	else if(childPID > 0){
+		if(backgroundFlag == 0){
+			// testing
+			printf("Parent waiting...\n");
+			fflush(stdout);
+
+			waitpid(childPID, childExitMethod, 0);
+		}
+		else{
+			// testing
+			printf("background process...\n");
+			fflush(stdout);
+		}
+	}
 }
 
 // prints the exit status or terminating signal for last foregrouond
@@ -238,11 +277,13 @@ void status(int childExitMethod){
 		// check to see if exited
 		if(WIFEXITED(childExitMethod)){
 			exitStatus = WEXITSTATUS(childExitMethod);
-			printf("exit value %d", exitStatus);
+			printf("exit value %d\n", exitStatus);
+			fflush(stdout);
 		}
 		else if(WIFSIGNALED(childExitMethod)){
 			termSig = WTERMSIG(childExitMethod);
-			printf("terminated by signal %d", termSig);
+			printf("terminated by signal %d\n", termSig);
+			fflush(stdout);
 		}
 	}
 }
