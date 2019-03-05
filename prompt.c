@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,11 +17,9 @@ void cd(char* pathName);
 pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag, int* fgChildExitMethod);
 void killBgPIDs(pid_t bgPIDs[50], int bgPIDsStat[50], int numBgPIDs);
 void status(int childExitMethod);
+void statusBgPID(pid_t bgPID, int bgChildExitMethod, pid_t bgPIDs[50], int bgPIDsStat[50], int numBgPIDs);
 
 int main(){
-
-	// testing
-	int loopGuard = 0;
 
 	char* input = NULL;
 	size_t cmdLength = 2049;
@@ -49,13 +48,25 @@ int main(){
 	int fgChildExitMethod = -5;
 	pid_t childPID = -5;
 	pid_t fgChildPID = -5;
+	pid_t bgChildPID = -5;
+	int bgChildExitMethod = -5;
 	pid_t bgPIDs[50];
 	int bgPIDsStat[50];
 	int numBgPIDs = 0;
 
-	// testing: have limited # of times while can run for now...
-	while(loopGuard < 75){
-		
+	// structs for signals
+	struct sigaction SIGINT_parent = {0};
+	
+	// setup how parent will deal with SIGINT
+	SIGINT_parent.sa_handler = SIG_IGN;
+	sigfillset(&SIGINT_parent.sa_mask);
+	SIGINT_parent.sa_flags = 0;
+
+	// tell parent to ignore SIGINT
+	sigaction(SIGINT, &SIGINT_parent, 0);
+
+	while(1){
+	
 		printf(": ");
 		fflush(stdout);	
 	
@@ -64,7 +75,13 @@ int main(){
 
 		input[nread - 1] = '\0';
 
-		if(input[0] == '#'){
+		// check for terminated bg processes
+		bgChildPID = waitpid(-1, &bgChildExitMethod, WNOHANG);
+		if(bgChildPID > 0){
+			statusBgPID(bgChildPID, bgChildExitMethod, bgPIDs, bgPIDsStat, numBgPIDs);
+		}
+
+		if(input[0] == '#' || input[0] == '\0'){
 			continue;
 		}
 		
@@ -72,7 +89,7 @@ int main(){
 		token = strtok(input, " ");
 
 		while(token != NULL){
-			
+		
 			// check for double dollar sign 
 			if(strstr(token, "$$") != NULL){
 				// testing
@@ -159,8 +176,6 @@ int main(){
 		commandFlag = 0;
 		backgroundFlag = 0;
 		numArgs = 0;
-
-		loopGuard++;
 	}
 
 	free(input);
@@ -198,14 +213,27 @@ void cd(char* pathName){
 // https://web.mst.edu/~ercal/284/UNIX-fork-exec/Fork-Exec-2.cpp
 pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag, int* fgChildExitMethod){
 
-	int inFD, outFD, result;
+	int inFD, outFD, result, termSig;
 	pid_t childPID;
+
+	// struct for fg child signal
+	struct sigaction SIGINT_child = {0};
+	
+	// setup how parent will deal with SIGINT
+	SIGINT_child.sa_handler = SIG_DFL;
+	sigfillset(&SIGINT_child.sa_mask);
+	SIGINT_child.sa_flags = 0;
 
 	childPID = fork();
 
 	// child thread 
 	if(childPID == 0){
-	
+
+		if(backgroundFlag == 0){
+			// tell child not to ignore SIGINT
+			sigaction(SIGINT, &SIGINT_child, 0);
+		}
+
 		// input file specified
 		if(strlen(inFile) != 0){
 		
@@ -294,7 +322,7 @@ pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgro
 			result = dup2(outFD, 1);
 
 			// check redirection
-			if(result = -1){
+			if(result == -1){
 				perror("background output dup2()");
 				fflush(stdout);
 				exit(1);
@@ -317,6 +345,13 @@ pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgro
 		if(backgroundFlag == 0){
 
 			waitpid(childPID, fgChildExitMethod, 0);
+
+			// check to see if fg child killed by signal
+			if(WIFSIGNALED(*fgChildExitMethod)){
+				termSig = WTERMSIG(*fgChildExitMethod);
+				printf("terminated by signal %d\n", termSig);
+				fflush(stdout);
+			}
 		}
 		else if(backgroundFlag == 1){
 
@@ -369,3 +404,36 @@ void status(int childExitMethod){
 		}
 	}
 }
+
+// kills a specified background process
+void statusBgPID(pid_t bgPID, int bgChildExitMethod, pid_t bgPIDs[50], int bgPIDsStat[50], int numBgPIDs){
+	
+	int exitStatus;
+	int termSig;
+
+	printf("background PID %d is done: ", bgPID);
+
+	// get status of terminated background process
+	// check to see if exited
+	if(WIFEXITED(bgChildExitMethod)){
+		exitStatus = WEXITSTATUS(bgChildExitMethod);
+		printf("exit value %d\n", exitStatus);
+		fflush(stdout);
+	}
+	else if(WIFSIGNALED(bgChildExitMethod)){
+		termSig = WTERMSIG(bgChildExitMethod);
+		printf("terminated by signal %d\n", termSig);
+		fflush(stdout);
+	}
+	
+	// update bg list
+	int i = 0;
+	for(i; i < numBgPIDs; i++){
+		if(bgPIDsStat[i] == 0){
+			if(bgPID == bgPIDs[i]){
+				bgPIDsStat[i] = 1;
+			}
+		}
+	}
+}
+
