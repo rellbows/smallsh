@@ -13,8 +13,12 @@
 int MAXARGS = 513; // 512 args + NULL
 int MAXARGSIZE = 100;
 
+int bgMuteFlag = 0; // used with SIGSTP signal cntl if bg processes can be run
+
+void bgMute(int signo);
 void cd(char* pathName);
 pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag, int* fgChildExitMethod);
+void expandPID(char* fullString, char* pidLoc, char* newString, pid_t currentPID);
 void killBgPIDs(pid_t bgPIDs[50], int bgPIDsStat[50], int numBgPIDs);
 void status(int childExitMethod);
 void statusBgPID(pid_t bgPID, int bgChildExitMethod, pid_t bgPIDs[50], int bgPIDsStat[50], int numBgPIDs);
@@ -27,6 +31,7 @@ int main(){
 	ssize_t nread;
 
 	pid_t smallshPID = getpid();
+	char* pidSymResult;
 
 	char* token = NULL;
 
@@ -53,26 +58,46 @@ int main(){
 	pid_t bgPIDs[50];
 	int bgPIDsStat[50];
 	int numBgPIDs = 0;
+	
 
 	// structs for signals
-	struct sigaction SIGINT_parent = {0};
+	struct sigaction ignore_SIGINT = {0}, SIGTSTP_bgMute = {0};
+	
+	// setup how to deal with SIGSTP
+	SIGTSTP_bgMute.sa_handler = bgMute;
+	sigfillset(&SIGTSTP_bgMute.sa_mask);
+	SIGTSTP_bgMute.sa_flags = SA_RESTART;
 	
 	// setup how parent will deal with SIGINT
-	SIGINT_parent.sa_handler = SIG_IGN;
-	sigfillset(&SIGINT_parent.sa_mask);
-	SIGINT_parent.sa_flags = 0;
+	ignore_SIGINT.sa_handler = SIG_IGN;
 
+	// setup sig handler for SIGSTP
+	sigaction(SIGTSTP, &SIGTSTP_bgMute, NULL);
 	// tell parent to ignore SIGINT
-	sigaction(SIGINT, &SIGINT_parent, 0);
+	sigaction(SIGINT, &ignore_SIGINT, NULL);
 
-	while(1){
-	
-		printf(": ");
-		fflush(stdout);	
-	
-		// user input
-		nread = getline(&input, &cmdLength, stdin);	
 
+	int loopTracker = 0;
+
+	while(loopTracker < 75){
+	
+		loopTracker++;
+
+		while(1){
+			printf(": ");
+			fflush(stdout);	
+	
+			// user input
+			nread = getline(&input, &cmdLength, stdin);
+			
+			if(nread == -1){
+				clearerr(stdin);
+			}
+			else{
+				break;
+			}
+		}
+		
 		input[nread - 1] = '\0';
 
 		// check for terminated bg processes
@@ -90,14 +115,9 @@ int main(){
 
 		while(token != NULL){
 		
-			// check for double dollar sign 
-			if(strstr(token, "$$") != NULL){
-				// testing
-				//printf("Double Doller Sign!\n");
-			}
-
+		
 					// input file
-			else if(token[0] == '<'){
+			if(token[0] == '<'){
 
 				token = strtok(NULL, " ");
 				strncpy(inFile, token, (size_t) MAXARGSIZE);
@@ -110,10 +130,19 @@ int main(){
 			}
 			else if(token[0] == '&'){
 
-				backgroundFlag = 1;
+				// check to see if bg mute flag is set
+				if(bgMuteFlag == 0){
+					backgroundFlag = 1;
+				}
+				else{
+					backgroundFlag = 0;
+				}	
+				
 			}
 			// argument
 			else{
+
+				
 	
 				// check num of arguments
 				numArgs++;
@@ -122,8 +151,19 @@ int main(){
 					break;
 				}
 				else{
+
 					inputArgs[numArgs - 1] = malloc(MAXARGSIZE * sizeof(char));
-					strncpy(inputArgs[numArgs - 1], token, (size_t) MAXARGSIZE);
+
+					// expand $$ to PID if found
+					pidSymResult = strstr(token, "$$");
+
+					if(pidSymResult != NULL){
+						expandPID(token, pidSymResult, inputArgs[numArgs - 1], smallshPID);
+					}
+					else{
+
+						strncpy(inputArgs[numArgs - 1], token, (size_t) MAXARGSIZE);
+					}
 				}
 			}
 
@@ -169,8 +209,7 @@ int main(){
 		// reset args
 		int i = 0;
 		for(i; i < (numArgs - 1); i++){
-			free(inputArgs[i]);
-		}
+			free(inputArgs[i]); }
 
 		// reset command flag, background flag, and arg counter for next command
 		commandFlag = 0;
@@ -184,10 +223,35 @@ int main(){
 }
 
 // expands the double dollar sign to the current PID
-void expandPID(char* arg){
-	// testing	
-	printf("In expandPID");
-	fflush(stdout);
+void expandPID(char* fullString, char* pidLoc, char* newString, pid_t currentPID){
+
+	int length = strlen(fullString);
+
+	if(length >= (MAXARGSIZE - 5)){
+		printf("Error, not enough room to safetly expand PID");
+		exit(1);
+	}
+	else{
+		strncpy(newString, fullString, pidLoc - fullString);
+		newString[pidLoc - fullString] = '\0';
+		sprintf(newString + (pidLoc - fullString), "%d%s", currentPID, fullString + ( pidLoc - fullString + 2), MAXARGSIZE);
+	}
+}
+
+// sig handler for muting whether bg processes can be implemented - used
+// with SIGSTP
+void bgMute(int signo){
+
+	char* muteOn = "Entering foreground-only mode (& is now ignored)\n";
+	char* muteOff = "Exiting foreground-only mode\n";
+	if(bgMuteFlag == 0){
+		write(STDOUT_FILENO, muteOn, 49);
+		bgMuteFlag = 1;
+	}
+	else{
+		write(STDOUT_FILENO, muteOff, 29);
+		bgMuteFlag = 0;
+	}
 }
 
 // changes the working directory
@@ -217,22 +281,29 @@ pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgro
 	pid_t childPID;
 
 	// struct for fg child signal
-	struct sigaction SIGINT_child = {0};
+	struct sigaction SIGINT_child = {0}, ignore_SIGTSTP = {0};
 	
-	// setup how parent will deal with SIGINT
+	// setup how child will deal with SIGINT
 	SIGINT_child.sa_handler = SIG_DFL;
 	sigfillset(&SIGINT_child.sa_mask);
 	SIGINT_child.sa_flags = 0;
+
+	// setup how child will deal with SIGTSP 
+	ignore_SIGTSTP.sa_handler = SIGTSTP;
 
 	childPID = fork();
 
 	// child thread 
 	if(childPID == 0){
-
+		
 		if(backgroundFlag == 0){
 			// tell child not to ignore SIGINT
-			sigaction(SIGINT, &SIGINT_child, 0);
+			sigaction(SIGINT, &SIGINT_child, NULL);
 		}
+		
+		// tell all children to ignore SIGTSTP
+		sigaction(SIGTSTP, &ignore_SIGTSTP, NULL);
+
 
 		// input file specified
 		if(strlen(inFile) != 0){
@@ -371,9 +442,6 @@ void killBgPIDs(pid_t bgPIDs[50], int bgPIDsStat[50], int numBgPIDs){
 		if(bgPIDsStat[i] == 0){
 			kill(bgPIDs[i], SIGKILL);
 			wait(NULL);
-			
-			// testing
-			printf("Killing bg: %d\n", bgPIDs[i]);
 		}
 	}
 }
