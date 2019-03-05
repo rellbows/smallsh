@@ -13,7 +13,8 @@ int MAXARGS = 513; // 512 args + NULL
 int MAXARGSIZE = 100;
 
 void cd(char* pathName);
-pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag);
+pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag, int* fgChildExitMethod);
+void killBgPIDs(pid_t bgPIDs[50], int bgPIDsStat[50], int numBgPIDs);
 void status(int childExitMethod);
 
 int main(){
@@ -23,8 +24,6 @@ int main(){
 
 	char* input = NULL;
 	size_t cmdLength = 2049;
-	//input = (char*) malloc(cmdLength * sizeof(char));
-	//memset(input, '\0', cmdLength);
 
 	ssize_t nread;
 
@@ -35,13 +34,6 @@ int main(){
 	char command[MAXARGSIZE];
 
 	char* inputArgs[MAXARGS];
-	/*
-	int j = 0;
-	for(j = 0; j < MAXARGS; j++){
-		inputArgs[j] = malloc(MAXARGSIZE * sizeof(char));
-		memset(inputArgs[j], '\0', MAXARGSIZE);
-	}
-	*/
 	int numArgs = 0;
 	
 	int commandFlag = 0;
@@ -54,10 +46,12 @@ int main(){
 	int backgroundFlag = 0;
 
 	// vars for command execution
-	int childExitMethod = -5;
+	int fgChildExitMethod = -5;
 	pid_t childPID = -5;
-	int backgroundPIDs[50];
-	int numBackgroundPIDs = 0;
+	pid_t fgChildPID = -5;
+	pid_t bgPIDs[50];
+	int bgPIDsStat[50];
+	int numBgPIDs = 0;
 
 	// testing: have limited # of times while can run for now...
 	while(loopGuard < 75){
@@ -82,45 +76,27 @@ int main(){
 			// check for double dollar sign 
 			if(strstr(token, "$$") != NULL){
 				// testing
-				//printf("Double Ampersand!\n");
+				//printf("Double Doller Sign!\n");
 			}
 
-			/* TODO: don't think this is needed
-			// load command
-			if(commandFlag == 0){
-				// testing
-				//printf("COMMAND\n");
-
-				strncpy(command, token, (size_t) MAXARGSIZE);
-				commandFlag = 1;
-			}
-			*/
-			// input file
+					// input file
 			else if(token[0] == '<'){
-				// testing
-				//printf("INPUT\n");				
 
 				token = strtok(NULL, " ");
 				strncpy(inFile, token, (size_t) MAXARGSIZE);
 			}
 			// output file
 			else if(token[0] == '>'){
-				// testing
-				//printf("OUTPUT\n");
 
 				token = strtok(NULL, " ");
 				strncpy(outFile, token, (size_t) MAXARGSIZE);
 			}
 			else if(token[0] == '&'){
-				// testing
-				//printf("AMP\n");
 
 				backgroundFlag = 1;
 			}
 			// argument
 			else{
-				// testing
-				//printf("ARG\n");	
 	
 				// check num of arguments
 				numArgs++;
@@ -143,36 +119,30 @@ int main(){
 
 		// use command (1st arg) to process input
 		if(strcmp(inputArgs[0], "exit") == 0){
-			// testing
-			printf("exit\n");
-			
+		
+			killBgPIDs(bgPIDs, bgPIDsStat, numBgPIDs);	
 			break;
 		}
 		else if(strcmp(inputArgs[0], "cd") == 0){
+			
 			cd(inputArgs[1]);
 		}
 		else if(strcmp(inputArgs[0], "status") == 0){
-			status(childExitMethod);
+			
+			status(fgChildExitMethod);
 		}
 		else if(strcmp(inputArgs[0], "") != 0){
-			// testing
-			printf("Not built-in cmd\n");
 		
-			childPID = execute(inputArgs, inFile, outFile, backgroundFlag);
+			childPID = execute(inputArgs, inFile, outFile, backgroundFlag, &fgChildExitMethod);
+			if(backgroundFlag == 0){
+				fgChildPID = childPID;
+			}
+			else{
+				bgPIDs[numBgPIDs] = childPID;
+				bgPIDsStat[numBgPIDs] = 0;
+				numBgPIDs++;
+			}
 		}
-
-		/*
-		// testing
-		printf("CMD: %s\n", command);
-		printf("ARGS:\n");
-		int l = 0;
-		for(l; l < (numArgs - 1); l++){
-			printf("%s\n", inputArgs[l]);
-		}
-		printf("IN: %s\n", inFile);
-		printf("OUT: %s\n", outFile);
-		printf("BACKGROUND: %d\n", backgroundFlag);
-		*/
 
 		// reset command and in/out file
 		memset(command, '\0', sizeof(command));
@@ -221,18 +191,14 @@ void cd(char* pathName){
 		fflush(stdout);
 		exit(1);
 	}
-
-	// testing
-	//printf("%s\n", getcwd(cwd, 100));
-	//fflush(stdout);
 }
 
 // handles the execution of commands
 // CITATION: used below link as ref. for setting up fork/execvp/wait
 // https://web.mst.edu/~ercal/284/UNIX-fork-exec/Fork-Exec-2.cpp
-pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag){
+pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgroundFlag, int* fgChildExitMethod){
 
-	int inFD, outFD, result, childExitMethod;
+	int inFD, outFD, result;
 	pid_t childPID;
 
 	childPID = fork();
@@ -243,9 +209,6 @@ pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgro
 		// input file specified
 		if(strlen(inFile) != 0){
 		
-			// testing
-			printf("In inFile %s\n", inFile);
-			
 			inFD = open(inFile, O_RDONLY);
 			
 			// check open
@@ -268,12 +231,32 @@ pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgro
 			// close on exec call
 			fcntl(inFD, F_SETFD, FD_CLOEXEC);
 		}
+		else if(backgroundFlag == 1){
+			
+			inFD = open("/dev/null", O_RDONLY);
+
+			// check open
+			if(inFD == -1){
+				perror("background input file open()");
+				fflush(stdout);
+				exit(1);
+			}
+
+			result = dup2(inFD, 0);
+
+			// check redirection
+			if(result == -1){
+				perror("background input dup2()");
+				fflush(stdout);
+				exit(1);
+			}
+
+			// close on exec call
+			fcntl(inFD, F_SETFD, FD_CLOEXEC);
+		}
 
 		// output file specified
 		if(strlen(outFile) != 0){
-
-			// testing
-			printf("In outFile%s\n", outFile);
 
 			outFD = open(outFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 			
@@ -297,10 +280,29 @@ pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgro
 			// close on exec call
 			fcntl(outFD, F_SETFD, FD_CLOEXEC);
 		}
-	
-		// testing
-		printf("Child executing... %s, %d\n", inputArgs[0], childPID);
-		fflush(stdout);
+		else if(backgroundFlag == 1){
+			
+			outFD = open("/dev/null", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+			// check open
+			if(outFD == -1){
+				perror("background output file open()");
+				fflush(stdout);
+				exit(1);
+			}
+
+			result = dup2(outFD, 1);
+
+			// check redirection
+			if(result = -1){
+				perror("background output dup2()");
+				fflush(stdout);
+				exit(1);
+			}
+
+			// close on exec call
+			fcntl(outFD, F_SETFD, FD_CLOEXEC);
+		}
 
 		execvp(inputArgs[0], inputArgs);
 
@@ -311,17 +313,32 @@ pid_t execute(char* inputArgs[MAXARGS], char* inFile, char* outFile, int backgro
 	// parent thread
 	else if(childPID > 0){
 		
+		// foreground process
 		if(backgroundFlag == 0){
-			// testing
-			printf("Parent waiting... %d\n", childPID);
-			fflush(stdout);
 
-			waitpid(childPID, &childExitMethod, 0);
+			waitpid(childPID, fgChildExitMethod, 0);
 		}
-		else{
+		else if(backgroundFlag == 1){
+
+			printf("background pid is %d\n", childPID);
+		}
+	}
+
+	return childPID;
+}
+
+// kills all background processes
+void killBgPIDs(pid_t bgPIDs[50], int bgPIDsStat[50], int numBgPIDs){
+
+	// loop thru all bg PID's - kill and wait each
+	int i = 0;
+	for(i; i < numBgPIDs; i++){
+		if(bgPIDsStat[i] == 0){
+			kill(bgPIDs[i], SIGKILL);
+			wait(NULL);
+			
 			// testing
-			printf("background process...\n");
-			fflush(stdout);
+			printf("Killing bg: %d\n", bgPIDs[i]);
 		}
 	}
 }
