@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <wait.h>
+#include <sys/wait.h>
 
 int MAXARGS = 513; // 512 args + NULL
 int MAXARGSIZE = 100;
